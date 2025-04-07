@@ -2,7 +2,21 @@ import streamlit as st
 import plotly.graph_objects as go
 import numpy as np
 from typing import List, Tuple, Dict
-import plotly.colors as colors
+
+def rotate_points(points: List[Tuple[float, float]], angle_deg: float) -> List[Tuple[float, float]]:
+    """Rotate points around origin by angle in degrees"""
+    angle_rad = np.radians(angle_deg)
+    rot_matrix = np.array([
+        [np.cos(angle_rad), -np.sin(angle_rad)],
+        [np.sin(angle_rad), np.cos(angle_rad)]
+    ])
+    
+    rotated_points = []
+    for x, y in points:
+        rotated = rot_matrix @ np.array([x, y])
+        rotated_points.append((rotated[0], rotated[1]))
+    
+    return rotated_points
 
 def calculate_wind_zones(length, width, height, wind_direction):
     """
@@ -37,20 +51,20 @@ def calculate_wind_zones(length, width, height, wind_direction):
     if e < d:
         # Case where e < d (divide into A, B, C)
         zones[windward_face] = {
-            'A': {'x1': 0, 'x2': e/5, 'y1': 0, 'y2': h},
-            'B': {'x1': e/5, 'x2': e, 'y1': 0, 'y2': h},
-            'C': {'x1': e, 'x2': d, 'y1': 0, 'y2': h}
+            'A': {'x1': 0, 'x2': e/5, 'y1': 0, 'y2': height},
+            'B': {'x1': e/5, 'x2': e, 'y1': 0, 'y2': height},
+            'C': {'x1': e, 'x2': d, 'y1': 0, 'y2': height}
         }
     elif e >= d and e < 5*d:
         # Case where e ≥ d (divide into A, B)
         zones[windward_face] = {
-            'A': {'x1': 0, 'x2': e/5, 'y1': 0, 'y2': h},
-            'B': {'x1': e/5, 'x2': d, 'y1': 0, 'y2': h}
+            'A': {'x1': 0, 'x2': e/5, 'y1': 0, 'y2': height},
+            'B': {'x1': e/5, 'x2': d, 'y1': 0, 'y2': height}
         }
     else:
         # Case where e ≥ 5d (only zone A)
         zones[windward_face] = {
-            'A': {'x1': 0, 'x2': d, 'y1': 0, 'y2': h}
+            'A': {'x1': 0, 'x2': d, 'y1': 0, 'y2': height}
         }
     
     # Leeward face (opposite to windward)
@@ -60,7 +74,7 @@ def calculate_wind_zones(length, width, height, wind_direction):
         
     # Leeward face is always zone D
     zones[leeward_face] = {
-        'D': {'x1': 0, 'x2': d, 'y1': 0, 'y2': h}
+        'D': {'x1': 0, 'x2': d, 'y1': 0, 'y2': height}
     }
     
     # Side faces (perpendicular to wind direction)
@@ -72,7 +86,7 @@ def calculate_wind_zones(length, width, height, wind_direction):
     # Side faces are zone E
     for face in side_faces:
         zones[face] = {
-            'E': {'x1': 0, 'x2': b, 'y1': 0, 'y2': h}
+            'E': {'x1': 0, 'x2': b, 'y1': 0, 'y2': height}
         }
     
     return zones, e, windward_face
@@ -407,21 +421,6 @@ def create_building_with_zones(length, width, height, orientation, wind_directio
     )
     
     return fig, e_param, windward_face
-
-def rotate_points(points: List[Tuple[float, float]], angle_deg: float) -> List[Tuple[float, float]]:
-    """Rotate points around origin by angle in degrees"""
-    angle_rad = np.radians(angle_deg)
-    rot_matrix = np.array([
-        [np.cos(angle_rad), -np.sin(angle_rad)],
-        [np.sin(angle_rad), np.cos(angle_rad)]
-    ])
-    
-    rotated_points = []
-    for x, y in points:
-        rotated = rot_matrix @ np.array([x, y])
-        rotated_points.append((rotated[0], rotated[1]))
-    
-    return rotated_points
 
 def main():
     st.title("Wind Load Calculator - BS EN 1991-1-4")
