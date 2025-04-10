@@ -103,7 +103,7 @@ col1, col2 = st.columns([2, 1])
 with col1:
     # Create a folium map
     m = folium.Map(location=[st.session_state['latitude'], st.session_state['longitude']], 
-                  zoom_start=6)
+                  zoom_start=6, tiles="Cartodb dark_matter")
     
     # Add a marker for the current position
     folium.Marker(
