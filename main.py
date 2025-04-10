@@ -2,6 +2,241 @@ import streamlit as st
 import plotly.graph_objects as go
 import numpy as np
 from typing import List, Tuple, Dict
+import pandas as pd
+import requests
+from geopy.distance import geodesic
+import folium
+from streamlit_folium import folium_static
+import json
+import io
+from PIL import Image
+import osmnx as ox
+import geopandas as gpd
+from shapely.geometry import Point
+
+###
+Map Viewer
+###
+
+st.set_page_config(layout="wide", page_title="Eurocode Wind Pressure Calculator")
+
+st.title("Eurocode 1991-1-4 Wind Pressure Calculator")
+st.write("Select your building location to calculate the basic wind parameters")
+
+# Initialize session state variables if they don't exist
+if 'latitude' not in st.session_state:
+    st.session_state['latitude'] = 51.5074  # London default
+if 'longitude' not in st.session_state:
+    st.session_state['longitude'] = -0.1278
+if 'altitude' not in st.session_state:
+    st.session_state['altitude'] = None
+if 'sea_distance' not in st.session_state:
+    st.session_state['sea_distance'] = None
+if 'manual_altitude' not in st.session_state:
+    st.session_state['manual_altitude'] = False
+if 'manual_sea_distance' not in st.session_state:
+    st.session_state['manual_sea_distance'] = False
+
+@st.cache_data(ttl=3600)
+def get_coastline_data(bbox):
+    """
+    Get coastline data from OpenStreetMap within the specified bounding box
+    bbox: tuple of (south, west, north, east) coordinates
+    """
+    try:
+        # Get natural=coastline features from OpenStreetMap
+        coastline_data = ox.features_from_bbox(
+            bbox[0], bbox[1], bbox[2], bbox[3],
+            tags={'natural': 'coastline'}
+        )
+        return coastline_data
+    except Exception as e:
+        st.warning(f"Could not fetch coastline data: {str(e)}")
+        return None
+
+@st.cache_data(ttl=3600)
+def get_elevation(lat, lng):
+    """
+    Get elevation data from the Open-Elevation API
+    """
+    try:
+        query = f"https://api.open-elevation.com/api/v1/lookup?locations={lat},{lng}"
+        r = requests.get(query, timeout=10)
+        if r.status_code == 200:
+            return r.json()['results'][0]['elevation']
+        else:
+            # Try alternative API - OpenTopoData
+            alt_query = f"https://api.opentopodata.org/v1/eudem25m?locations={lat},{lng}"
+            r_alt = requests.get(alt_query, timeout=10)
+            if r_alt.status_code == 200:
+                return r_alt.json()['results'][0]['elevation']
+            else:
+                return None
+    except Exception as e:
+        st.warning(f"Error getting elevation data: {e}")
+        return None
+
+def calculate_sea_distance(lat, lng, coastline_data):
+    """
+    Calculate the shortest distance to the sea using OpenStreetMap coastline data
+    """
+    if coastline_data is None or coastline_data.empty:
+        return None
+    
+    try:
+        # Create a Point from the input coordinates
+        point = Point(lng, lat)
+        
+        # Calculate distances to all coastline segments
+        point_gdf = gpd.GeoDataFrame(geometry=[point], crs=coastline_data.crs)
+        
+        # Find the minimum distance to any coastline segment
+        distances = coastline_data.distance(point_gdf.iloc[0]['geometry'])
+        min_distance = distances.min() / 1000  # Convert to kilometers
+        
+        return min_distance
+    except Exception as e:
+        st.warning(f"Error calculating distance to coastline: {e}")
+        return None
+
+# Create two columns layout
+col1, col2 = st.columns([2, 1])
+
+with col1:
+    # Create a folium map
+    m = folium.Map(location=[st.session_state['latitude'], st.session_state['longitude']], 
+                  zoom_start=6)
+    
+    # Add a marker for the current position
+    folium.Marker(
+        [st.session_state['latitude'], st.session_state['longitude']],
+        popup="Selected Location",
+        tooltip="Drag to change location",
+        draggable=True
+    ).add_to(m)
+    
+    # Display the map
+    map_data = folium_static(m, width=700, height=500)
+    
+    # Get map center (this is an approximation, since folium_static doesn't directly return the marker position)
+    st.write("Enter precise coordinates if the map didn't update correctly:")
+    col_lat, col_lng = st.columns(2)
+    
+    with col_lat:
+        new_lat = st.number_input("Latitude", min_value=-90.0, max_value=90.0, 
+                                 value=st.session_state['latitude'], format="%.4f")
+    with col_lng:
+        new_lng = st.number_input("Longitude", min_value=-180.0, max_value=180.0, 
+                                 value=st.session_state['longitude'], format="%.4f")
+    
+    if new_lat != st.session_state['latitude'] or new_lng != st.session_state['longitude']:
+        st.session_state['latitude'] = new_lat
+        st.session_state['longitude'] = new_lng
+        
+        # Reset calculations when coordinates change
+        st.session_state['altitude'] = None
+        st.session_state['sea_distance'] = None
+        st.experimental_rerun()
+
+with col2:
+    st.subheader("Location Parameters")
+    st.write(f"**Latitude:** {st.session_state['latitude']:.4f}°")
+    st.write(f"**Longitude:** {st.session_state['longitude']:.4f}°")
+    
+    # Calculate parameters button
+    if st.button("Calculate Parameters"):
+        # Define a bounding box for coastline data (approximately ±5 degrees from the point)
+        lat, lng = st.session_state['latitude'], st.session_state['longitude']
+        bbox = (lat-5, lng-5, lat+5, lng+5)  # (south, west, north, east)
+        
+        # Get elevation
+        if not st.session_state['manual_altitude']:
+            with st.spinner("Fetching elevation data..."):
+                altitude = get_elevation(lat, lng)
+                if altitude is not None:
+                    st.session_state['altitude'] = altitude
+                else:
+                    st.warning("Could not retrieve elevation data. Please enter manually.")
+                    st.session_state['manual_altitude'] = True
+        
+        # Get coastline data and calculate distance
+        if not st.session_state['manual_sea_distance']:
+            with st.spinner("Calculating distance to sea..."):
+                coastline_data = get_coastline_data(bbox)
+                if coastline_data is not None and not coastline_data.empty:
+                    sea_distance = calculate_sea_distance(lat, lng, coastline_data)
+                    if sea_distance is not None:
+                        st.session_state['sea_distance'] = sea_distance
+                    else:
+                        st.warning("Could not calculate distance to sea. Please enter manually.")
+                        st.session_state['manual_sea_distance'] = True
+                else:
+                    st.warning("Could not retrieve coastline data. Please enter manually.")
+                    st.session_state['manual_sea_distance'] = True
+    
+    # Manual inputs if automatic calculation fails
+    st.write("### Parameter Values")
+    
+    # Manual input for altitude
+    if st.session_state['manual_altitude'] or st.session_state['altitude'] is None:
+        st.session_state['manual_altitude'] = True
+        st.session_state['altitude'] = st.number_input(
+            "Altitude above sea level (m)",
+            min_value=0.0,
+            max_value=5000.0,
+            value=st.session_state['altitude'] if st.session_state['altitude'] is not None else 0.0,
+            step=1.0
+        )
+    else:
+        st.metric("Altitude above sea level", f"{st.session_state['altitude']:.1f} m")
+        if st.checkbox("Edit altitude manually", value=False):
+            st.session_state['manual_altitude'] = True
+            st.experimental_rerun()
+    
+    # Manual input for sea distance
+    if st.session_state['manual_sea_distance'] or st.session_state['sea_distance'] is None:
+        st.session_state['manual_sea_distance'] = True
+        st.session_state['sea_distance'] = st.number_input(
+            "Distance to sea (km)",
+            min_value=0.0,
+            max_value=1000.0,
+            value=st.session_state['sea_distance'] if st.session_state['sea_distance'] is not None else 0.0,
+            step=0.1
+        )
+    else:
+        st.metric("Distance to sea", f"{st.session_state['sea_distance']:.1f} km")
+        if st.checkbox("Edit sea distance manually", value=False):
+            st.session_state['manual_sea_distance'] = True
+            st.experimental_rerun()
+    
+    # Eurocode parameters based on location
+    if st.session_state['altitude'] is not None and st.session_state['sea_distance'] is not None:
+        st.subheader("Derived Eurocode Parameters")
+        
+        # Determine terrain category based on distance to sea
+        terrain_category = "II"  # Default
+        
+        if st.session_state['sea_distance'] < 2:
+            # Coastal area
+            terrain_category = "0"
+        elif st.session_state['sea_distance'] < 10:
+            # Near coastal
+            terrain_category = "I"
+        
+        st.write(f"**Suggested Terrain Category:** {terrain_category}")
+        
+        # Example of basic wind speed calculation (simplified)
+        # In a real application, you would implement the full Eurocode calculation
+        basic_wind_speed = 27.0  # Default value in m/s
+        
+        st.write(f"**Basic Wind Speed (vb,0):** {basic_wind_speed} m/s")
+        
+        # Place for your Eurocode calculations
+        st.info("Complete your Eurocode calculations based on these parameters in the next section of your app.")
+
+###
+Graph Viewer
+###
 
 def rotate_points(points: List[Tuple[float, float]], angle_deg: float) -> List[Tuple[float, float]]:
     """Rotate points around origin by angle in degrees"""
