@@ -14,9 +14,7 @@ import osmnx as ox
 import geopandas as gpd
 from shapely.geometry import Point
 
-###
-Map Viewer
-###
+### Map Viewer ###
 
 st.set_page_config(layout="wide", page_title="Eurocode Wind Pressure Calculator")
 
@@ -234,9 +232,7 @@ with col2:
         # Place for your Eurocode calculations
         st.info("Complete your Eurocode calculations based on these parameters in the next section of your app.")
 
-###
-Graph Viewer
-###
+### Graph Viewer ###
 
 def rotate_points(points: List[Tuple[float, float]], angle_deg: float) -> List[Tuple[float, float]]:
     """Rotate points around origin by angle in degrees"""
