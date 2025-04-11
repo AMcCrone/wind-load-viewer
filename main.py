@@ -114,7 +114,7 @@ with col1:
     ).add_to(m)
     
     # Display the map
-    map_data = folium_static(m, width=700, height=500, tiles="Cartodb dark_matter")
+    map_data = folium_static(m, width=700, height=500)
     
     # Get map center (this is an approximation, since folium_static doesn't directly return the marker position)
     st.write("Enter precise coordinates if the map didn't update correctly:")
